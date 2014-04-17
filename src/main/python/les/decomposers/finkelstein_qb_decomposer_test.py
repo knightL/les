@@ -48,8 +48,8 @@ class FinkelsteinQBDecomposerTest(unittest.TestCase):
     self.assert_equal([u'x3', u'x4', u'x5', u'x6', u'x7'],
                       sorted(p1.get_columns_names()))
 
-  def rtest_decompose2(self):
-    model = linear_model.build(
+  def test_decompose2(self):
+    model = MPModelBuilder.build_from_scratch(
       [2, 3, 1, 5, 4, 6, 1],
       [[3., 4., 1., 0., 0., 0., 0.],
        [0., 2., 3., 3., 0., 0., 0.],
@@ -66,7 +66,28 @@ class FinkelsteinQBDecomposerTest(unittest.TestCase):
       self.assert_equal(len(t), len(r))
       for i in range(len(t)):
         self.assert_equal(t[i], r[i])
+        
+  def test_decompose3(self):
+    model = MPModelBuilder.build_from_scratch(
+      [1, 1, 1, 1, 1],
+      [[1, 1, 0, 0, 0],
+       [0, 1, 1, 0, 0],
+       [0, 0, 1, 1, 0],
+       [0, 0, 0, 1, 1]],
+      ['L'] * 4,
+      [1, 1, 1,1])
+    decomposer = finkelstein_qb_decomposer.FinkelsteinQBDecomposer(model)
+    decomposer.decompose()
 
+    u = [set([0]), set([1]), set([2]),set([3])]
+    s = [set([]), set([1]), set([2]),set([3])]
+    m = [set([0]), set([]), set([]), set([4])]
+    for t, r in ((u, decomposer._u), (s, decomposer._s), (m, decomposer._m)):
+      self.assert_equal(len(t), len(r))
+      for i in range(len(t)):
+        self.assert_equal(t[i], r[i])
+    tree = decomposer.get_decomposition_tree()
+                      	
 
 if __name__ == '__main__':
   unittest.main()

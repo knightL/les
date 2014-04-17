@@ -1,52 +1,3 @@
-# Copyright (c) 2012-2013 Oleksandr Sviridenko
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#       http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-'''The Finkelstein's quasi-block decomposition algorithm is represented by
-:class:`FinkelsteinQBDecomposer` class.
-
-The following snippet shows how to create a simple :class:`~les.model.Model`
-instance with quasi-block structure and decompose it with help of Finkelstein's
-algorithm::
-
-  model = model.build_from_scratch(
-    [8, 2, 5, 5, 8, 3, 9, 7, 6],
-    [[2, 3, 4, 1, 0, 0, 0, 0, 0],
-     [1, 2, 3, 2, 0, 0, 0, 0, 0],
-     [0, 0, 1, 4, 3, 4, 2, 0, 0],
-     [0, 0, 2, 1, 1, 2, 5, 0, 0],
-     [0, 0, 0, 0, 0, 0, 2, 1, 2],
-     [0, 0, 0, 0, 0, 0, 3, 4, 1]],
-    [7, 6, 9, 7, 3, 5]
-  )
-  decomposer = FinkelsteinQBDecomposer(model)
-  decomposer.decompose()
-
-Once the model has been decomposed, its
-:class:`~les.decomposition_tree.DecompositionTree` can be obtained with help of
-:func:`get_decomposition_tree` method.
-'''
-
-# +---------+------+
-# |         |      |
-# +---------+------+------------+---+
-# ^         |      |            |   |
-# |         +------+------------+---+---------+
-# |         ^      ^            |   |         |
-# |         |      |            +---+---------+
-# |         |      |            ^   ^         ^
-# |   M     |  S   |     M      | S |    M    |
-#
 
 import networkx
 
@@ -64,9 +15,8 @@ def _get_indices(m, i):
   return result
 
 
-class FinkelsteinQBDecomposer(decomposer_base.DecomposerBase):
-  '''This class represents Finkelstein QB decomposer for MP problems.
-
+class FinkelsteinAdvDecomposer(decomposer_base.DecomposerBase):
+  '''
   :param model: A :class:`~les.mp_model.mp_model.MPModel` based model instance.
   '''
 
@@ -75,22 +25,22 @@ class FinkelsteinQBDecomposer(decomposer_base.DecomposerBase):
     self._u = []
     self._s = []
     self._m = []
+    self._p = []
+    self._used = []
+    self._used2 = []
+    self._layers =[]
+    self._layermodel =[]
 
-  def _build_decomposition_tree(self):
-    # TODO: fix this. Add default empty separators set.
-    s = self._s + [set()]
-    # TODO: check connectivity order.
-    prev_model = self._model.slice(self._u[-1], s[-2] | self._m[-1] | s[-1])
-    tree = DecompositionTree(self._model)
-    tree.add_node(prev_model)
-    tree.set_root(prev_model)
-    for i in xrange(len(self._u) - 2, -1, -1):
-      model = self._model.slice(self._u[i], s[i + 1] | self._m[i] | s[i])
-      tree.add_node(model)
-      tree.add_edge(prev_model, model,
-                    [self.get_model().get_columns_names()[i] for i in s[i + 1]])
-      prev_model = model
-    self._decomposition_tree = tree
+  def get_component(self,i):
+    if self._p[i]!=i:
+        self._p[i]=self.get_component(self._p[i])
+    return self._p[i]
+
+  def unite_components(self, i, j):
+
+    i=self.get_component(i)
+    j=self.get_component(j)
+    self._p[i]=j
 
   def decompose(self, initial_cols=[0], max_separator_size=0,
                 merge_empty_blocks=True):
@@ -106,6 +56,10 @@ class FinkelsteinQBDecomposer(decomposer_base.DecomposerBase):
     if max_separator_size:
       raise NotImplementedError()
     logging.info('Decompose model %s', self._model.get_name())
+
+    self._used=[]
+    self._used2=[]
+    self._p=[]
 
     m = self._model.get_rows_coefficients()
 
@@ -166,5 +120,53 @@ class FinkelsteinQBDecomposer(decomposer_base.DecomposerBase):
       if j+1 < i:
         current.update(self._s[j+1])
       self._u[j] = U(current)
+    
+    tree = DecompositionTree(self._model)
+    
+    for j in range(m.shape[1]):
+      self._p.append(j)
+      self._used.append(0)
+      self._used2.append(0)
+    
+    self._layers=[]
+    self._layermodel=[]
+    for j in range(i):
+      self._layers.append([])
+      self._layermodel.append([])
+    for j in range(i-1,-1,-1):
+      current=self._m[j] | self._s[j]
+      separator=set() | self._s[j]
+      if j+1<i:
+        current.update(self._s[j+1])
+        separator.update(self._s[j+1])
+      for k in current:
+        self._used[k]=1
+      for k in current - separator:
+        T=get_neighbors([k])
+        for _k in T:
+          if self._used[_k]:
+            self.unite_components(k,_k)
+      for k in current:
+        if not self._used2[k]:
+          self._layers[j].append(set())
+          for _k in current:
+            if self.get_component(k)==self.get_component(_k):
+              self._layers[j][-1].add(_k)
+              self._used2[_k]=1
+          u=U(self._layers[j][-1])
+          self._layermodel[j].append(self._model.slice(u, self._layers[j][-1]))
+          tree.add_node(self._layermodel[j][-1])
+          if j!=i-1:
+            for _k in range(len(self._layers[j+1])):
+              if len( self._layers[j][-1] & self._layers[j+1][_k] )>0:
+                tree.add_edge(self._layermodel[j][-1], self._layermodel[j+1][_k],
+                    [self.get_model().get_columns_names()[i] for i in self._layers[j][-1] & self._layers[j+1][_k]])
+      for k in separator:
+        T=get_neighbors([k])
+        for _k in T:
+          if self._used[_k]:
+            self.unite_components(k,_k)
+    tree.set_root(self._layermodel[0][0])
+          
 
-    self._build_decomposition_tree()
+    self._decomposition_tree = tree
